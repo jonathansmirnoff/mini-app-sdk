@@ -1,5 +1,12 @@
 import { deposit, withdraw, callSmartContract, authenticate, isWebView } from '../src/functions';
-import { ChainId, WebViewAction, ActionResponse, TransactionResult, TokenName } from '../src/types';
+import {
+  ChainId,
+  WebViewAction,
+  ActionResponse,
+  TransactionResult,
+  TokenName,
+  ContractStandard,
+} from '../src/types';
 
 // Mock window.ReactNativeWebView
 const mockPostMessage = jest.fn();
@@ -682,6 +689,86 @@ describe('Core SDK Functions', () => {
         expect(result.data.txHash).toBe('0xjkl...');
       }
     });
+
+    it('should support permits and contract standards', async () => {
+      const mockResponse = {
+        action: ActionResponse.CALL_SMART_CONTRACT_RESPONSE,
+        result: TransactionResult.SUCCESS,
+        data: {
+          txHash: '0xpermits...',
+        },
+      };
+
+      let messageHandler: MessageEventHandler;
+      mockAddEventListener.mockImplementation((event, handler) => {
+        if (event === 'message') {
+          messageHandler = handler as MessageEventHandler;
+        }
+      });
+
+      const contractPromise = callSmartContract({
+        contracts: [
+          {
+            contractAddress: '0xPermitContract...',
+            functionName: 'approve',
+            functionParams: ['0xSpender...', '1000'],
+            chainId: ChainId.POLYGON_AMOY,
+            value: '0',
+            contractStandard: ContractStandard.ERC20,
+            permits: [
+              {
+                owner: '0xOwner...',
+                token: '0xToken...',
+                spender: '0xSpender...',
+                amount: '1000',
+                deadline: '1700000000',
+                nonce: '1',
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(mockPostMessage).toHaveBeenCalledWith(
+        JSON.stringify({
+          action: WebViewAction.CALL_SMART_CONTRACT,
+          data: {
+            contracts: [
+              {
+                contractAddress: '0xPermitContract...',
+                functionName: 'approve',
+                functionParams: ['0xSpender...', '1000'],
+                chainId: ChainId.POLYGON_AMOY,
+                value: '0',
+                contractStandard: ContractStandard.ERC20,
+                permits: [
+                  {
+                    owner: '0xOwner...',
+                    token: '0xToken...',
+                    spender: '0xSpender...',
+                    amount: '1000',
+                    deadline: '1700000000',
+                    nonce: '1',
+                  },
+                ],
+              },
+            ],
+          },
+        })
+      );
+
+      setTimeout(() => {
+        messageHandler(new MessageEvent('message', { data: JSON.stringify(mockResponse) }));
+      }, 100);
+
+      jest.advanceTimersByTime(100);
+
+      const result = await contractPromise;
+      expect(result.result).toBe(TransactionResult.SUCCESS);
+      if (result.result === TransactionResult.SUCCESS) {
+        expect(result.data.txHash).toBe('0xpermits...');
+      }
+    });
   });
 
   describe('authenticate', () => {
@@ -787,9 +874,86 @@ describe('Core SDK Functions', () => {
         expect(result.data.message).toBe('Custom authentication message');
       }
     });
+
+    it('should allow calling authenticate with no params', async () => {
+      const mockResponse = {
+        action: ActionResponse.AUTHENTICATE_RESPONSE,
+        result: TransactionResult.SUCCESS,
+        data: {
+          wallet: '0xDefault...',
+          claims: [],
+          signature: '0xDefaultSig...',
+          message: 'Default message',
+        },
+      };
+
+      let messageHandler: MessageEventHandler;
+      mockAddEventListener.mockImplementation((event, handler) => {
+        if (event === 'message') {
+          messageHandler = handler as MessageEventHandler;
+        }
+      });
+
+      const authPromise = authenticate();
+
+      expect(mockPostMessage).toHaveBeenCalledWith(
+        JSON.stringify({
+          action: WebViewAction.AUTHENTICATE,
+          data: {},
+        })
+      );
+
+      setTimeout(() => {
+        messageHandler(new MessageEvent('message', { data: JSON.stringify(mockResponse) }));
+      }, 100);
+
+      jest.advanceTimersByTime(100);
+
+      const result = await authPromise;
+      expect(result.result).toBe(TransactionResult.SUCCESS);
+      if (result.result === TransactionResult.SUCCESS) {
+        expect(result.data.wallet).toBe('0xDefault...');
+        expect(result.data.claims).toEqual([]);
+        expect(result.data.signature).toBe('0xDefaultSig...');
+        expect(result.data.message).toBe('Default message');
+      }
+    });
   });
 
   describe('response handling edge cases', () => {
+    it('should remove message listener after a successful response', async () => {
+      const mockResponse = {
+        action: ActionResponse.DEPOSIT_RESPONSE,
+        result: TransactionResult.SUCCESS,
+        data: {
+          txHash: '0xlistener...',
+        },
+      };
+
+      let messageHandler: MessageEventHandler;
+      mockAddEventListener.mockImplementation((event, handler) => {
+        if (event === 'message') {
+          messageHandler = handler as MessageEventHandler;
+        }
+      });
+
+      const depositPromise = deposit({
+        amount: '100',
+        tokenName: TokenName.USDC,
+        chainId: ChainId.POLYGON_AMOY,
+      });
+
+      setTimeout(() => {
+        messageHandler(new MessageEvent('message', { data: JSON.stringify(mockResponse) }));
+      }, 100);
+
+      jest.advanceTimersByTime(100);
+
+      const result = await depositPromise;
+      expect(result.result).toBe(TransactionResult.SUCCESS);
+      expect(mockRemoveEventListener).toHaveBeenCalledWith('message', messageHandler);
+    });
+
     it('should handle timeout for deposit', async () => {
       const depositPromise = deposit({
         amount: '100',
